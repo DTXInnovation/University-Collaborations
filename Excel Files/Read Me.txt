@@ -1,0 +1,4 @@
+1. WQData_Raw is a copy of the data provided to the SMU team on Sharepoint 
+2. WQ_Clean is the final Excel file created after performing the data cleaning steps in Excel & R
+3. waterquality_clean has an index column and year column added for convenience
+4. ranked_scores is a file created in R

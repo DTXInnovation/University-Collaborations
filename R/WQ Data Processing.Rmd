@@ -1,0 +1,453 @@
+---
+title: "City of Dallas - Water Quality Data Processing"
+author: "Created by SMU Team: Emily Fogg, Hannah Roark, Hazel (Ruixue) Wu"
+output: html_notebook
+---
+
+### Introduction to R Markdown 
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Chunks are executed by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file). 
+
+Code preceded by a *#* symbol is a comment. Some comments are textual explanations, but some comments are pieces of code that you may or may not need at some point. To run the code, simply delete the *#* symbol, put your cursor on the line you want to run and press *Ctrl+Enter*. 
+
+-----------------------------------------------------------------------------------------------------
+
+### Preprocessing Steps in Excel 
+
+Step 1 - Select all contents and unmerge all cells 
+
+Step 2 - Use *CTRL + F* and *CTRL + -* to delete all Rows in Column A that contain the phrase "Water Quality Data 1"
+
+Step 3 - Use *CTRL + F* and *CTRL + -* to delete all rows in Column A that contain the year
+
+Step 4 - Use *CTRL + F* and *CTRL + -* to delete all rows in Column C that do not contain any data
+
+Step 5 - Use *CTRL + F* to confirm pollutant headers are consistent 
+
+Step 6 - Use *CTRL + F* to confirm watershed names are consistent
+
+Step 7 - Use data validation to confirm consistent formatting in Date Column
+
+Step 8 - Delete the first 5 unnecessary columns after the data. This prevents accidental spaces,  commas, and other miscellaneous marks from being identified in R
+
+-----------------------------------------------------------------------------------------------------
+
+### Preprocessing Steps in R
+
+#### Step 1 - Install and Load Libraries
+```{r Install and Load Libraries, include - FALSE, message = FALSE}
+# R packages are a collection of R functions, compiled code and sample data. They are stored under a directory called "library" in the R environment. By default, R installs a set of packages during installation. More packages are added later, when they are needed for some specific purpose.
+
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr) #Used for data formatting and manipulation
+library(ggplot2) # Creates visuals
+library(zoo) # Fills blank cells
+library(qwraps2) #Creates formatted summary tables
+library(readxl) # Reads Excel Files
+library(openxlsx)
+library(psych)
+
+# Run the code below to install the packages if you have never used them before - you will need to remove the "#" before the line. After running this once, you should replace the "#"
+# install.packages(c("ggplot2", "dplyr", "zoo", "gwraps2", "kableextra", "readxl", "openxlsx", "psych"))
+```
+
+-----------------------------------------------------------------------------------------------------
+
+#### Step 2 - Set Working Directory to Give R Access to Project Files
+
+In the toolbar, click session -> set working directory -> choose directory. Navigate to the folder containing the data file. 
+
+This will give R access to the .xlsx or .csv files that contain your data. It is recommended to place all files in one folder. 
+
+-----------------------------------------------------------------------------------------------------
+
+#### Step 3 - Read in the file
+
+Running the code below will open a "view" in the R file. Briefly scan the view to confirm you have opened the correct file with column headers in tact. Don't worry about missing values at this step. 
+
+```{r}
+data <- read_excel("WQData.xlsx", col_names = TRUE)
+
+# Add a column for the year the data was collected
+data$Year <- format(as.Date(data$`Collection Date` , format="%Y-%m-%d"),"%Y")
+
+# Additional code for reading in various file types
+# Read in a .txt file
+# data <- read.table("INSERT FILE NAME.txt")
+
+# Read in a .csv file
+# data <- read.csv("INSERT FILE NAME.csv")
+
+#Remove Total Coliform and Hardness columns from the dataframe
+data$`Total Coliform (MPN/100ml)` <- NULL
+
+# Print the data and browse
+data
+```
+
+
+-----------------------------------------------------------------------------------------------------
+
+#### Step 4 - Autofill the unmerged cells with the code below
+
+After unmerging cells in excel, there are numerous rows that now have missing values for the Watershed Name and Sample ID. The code below will populate those cells with the most recent value found above. Run the code and briefly scan the view to confirm the cells were filled as desired.
+
+```{r}
+# Fill the empty "HUC Watershed" cells with the most recent watershed above 
+data$`HUC Watershed` <- na.locf(data$`HUC Watershed`, na.rm = FALSE)
+
+# Fill the empty "Sample ID" cells with the most recent Sample ID above
+data$`Sample ID` <- na.locf(data$`Sample ID`, na.rm = FALSE)
+
+# Print the data and browse
+data
+
+# Code for filling empty cells in any new column
+# data$"INSERT COLUMN NAME" <- na.locf(data$"INSERT COLUMN NAME", na.rm = FALSE)
+```
+
+-----------------------------------------------------------------------------------------------------
+
+#### Step 5 - Handle < and > signs
+
+```{r}
+# List of data points where E. Coli has a greater than sign, or is less than 1. This is used so that you can look back at which data points  were treated
+e_coli_greaters <- grep(">", data$`E. Coli       (MPN / 100ml)`)
+e_coli_less <- grep("<1", data$`E. Coli       (MPN / 100ml)`)
+
+#Remove the "#" from the lines below to print out the lists of data points
+#e_coli_greaters
+#e_coli_less
+```
+
+```{r}
+# Delete data points where E.Coli has a ">" sign before the value
+data <- data[!grepl(">",data$`E. Coli       (MPN / 100ml)`),] 
+
+# Change E. Coli value to 0 where E. Coli is "<1"
+data$`E. Coli       (MPN / 100ml)` <- ifelse(data$`E. Coli       (MPN / 100ml)` == "<1", 0, data$`E. Coli       (MPN / 100ml)`)
+
+# Function for removing "<" from data points
+delete <- function(delete) {
+  gsub("[<,]", "", delete)
+}
+
+# Function for removing ">" from data points
+delete2 <- function(delete2) {
+  gsub("[>,]", "", delete2)
+}
+
+# Apply both delete functions to the dataset to remove remaining "<" and ">" from data
+data[] <- lapply(data, delete)
+data[] <- lapply(data, delete2)
+```
+
+-----------------------------------------------------------------------------------------------------
+
+#### Output the Clean Data to a New File
+
+The file will automatically save in the location that was set as your working directory in the beginning. 
+
+```{r}
+# The text contained in the quotes below will name your file
+clean_data <- write.xlsx(data, file="WQ_Clean.xlsx", row.names = FALSE)
+```
+
+-----------------------------------------------------------------------------------------------------
+
+### Statistical Analysis in R
+ 
+#### Step 1 - Handle & Summarize "DRY" Data
+
+Run the code below and open the view. Notice that underneath each column name is a description of the data type. At this step, the columns are classified as "<chr>" which is short for character. Later in the code we will convert the columns to numerical format to allow for statistical summarization. However, at this step, we will leave the columns as <chr> so we can summarize the number of cells that contain the text "DRY." 
+
+```{r}
+# Put data into a new dataframe - called wqd - for manipulation of strings. This prevents you from accidentally writing over the cleaned file that was created with the code above. 
+wqd <- data
+wqd
+```
+
+```{r}
+# Function to count all data points containing the word "DRY"
+countdry <- function(a){
+  
+  x <- table(a)
+  y <- x[names(x)=="DRY"]
+  
+  print(y)
+}
+
+# Count number of "DRY" values in the dataset
+countdry(wqd$pH)
+```
+
+```{r}
+# Create new column for month of each data point
+wqd_m <- wqd
+
+# wqd_m$Collection.Date <- as.Date(wqd_m$Collection.Date,"%m/%d/%Y")
+wqd_m$month <- format(as.Date(wqd_m$`Collection Date`),"%m")
+```
+
+```{r}
+# Fill NA cells with a blank space
+wqd_m[is.na(wqd_m)] <- "" 
+wqd_dm <- wqd_m[FALSE,]
+
+# Find all rows where there is a DRY value
+for(i in 1:nrow(wqd_m)){
+  if (wqd_m$pH[i]=="DRY"){
+    wqd_dm <- rbind(wqd_dm, wqd_m[i,])
+  }
+}
+```
+
+
+#### Create a Bar Plot to Show the Number of Dry Values per Month
+
+There are a lot of ways to customize visual graphs using the package called [ggplot2](http://www.sthda.com/english/wiki/ggplot2-barplots-quick-start-guide-r-software-and-data-visualization). Check out the website to learn more about updating the colors, titles, and labels. 
+
+
+[R Markdown](http://rmarkdown.rstudio.com) 
+```{r}
+# Create new data set with only dry values
+wqd_dm
+
+# Format data as a dataframe in order to plot values
+dm <- as.data.frame(table(wqd_dm$month))
+
+# Plot the number of DRY values in each month
+ggplot(dm, aes(x=Var1, y = Freq)) +
+  ggtitle("Frequency of 'DRY' Sample Records by Month") +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  geom_text(aes(label= Freq), vjust=-0.3, size=3.5) +
+  xlab("Month") + ylab("Frequency") +
+  theme_bw() + 
+  geom_bar(stat = "identity", color = "navyblue", fill = "steelblue")
+```
+
+```{r}
+# Place original data in a new frame for calculation
+wqd_c <- wqd 
+
+# Change all rows in dry value dataset to numerical format
+x <- as.numeric(rownames(wqd_dm)) 
+
+# Delete all rows with DRY values from the original dataset
+wqd_c <- wqd_c[-x,]
+```
+
+```{r}
+# Create a new excel file without DRY values called "water_dry"
+water_dry <- write.csv(data, file="water_dry.csv", row.names = FALSE)
+``` 
+ 
+-----------------------------------------------------------------------------------------------------
+
+#### Step 2 - Convert Data to Numerical Format
+```{r}
+# Explicitly manipulate all columns to numeric format to allow for quantitative calculations
+# All cells containg text are changed to NA to allow for computation
+data$`Temperature (°C)` <- as.numeric(data$`Temperature (°C)`)
+data$pH <- as.numeric(data$pH)
+data$`Turbidity (NTU)` <- as.numeric(data$`Turbidity (NTU)`)
+data$`Conductivity (µS/cm)` <- as.numeric(data$`Conductivity (µS/cm)`)
+data$`Dissolved Oxygen (mg/L)` <- as.numeric(data$`Dissolved Oxygen (mg/L)`)
+data$`Ammonia (as N) (mg/L)` <- as.numeric(data$`Ammonia (as N) (mg/L)`)
+data$`Nitrate + Nitrite (as N) (mg/L)` <- as.numeric(data$`Nitrate + Nitrite (as N) (mg/L)`)
+data$`Total Phosphorus (as P) (mg/L)` <- as.numeric(data$`Total Phosphorus (as P) (mg/L)`)
+data$`Chemical Oxygen Demand (mg/L)` <- as.numeric(data$`Chemical Oxygen Demand (mg/L)`)
+data$`Total Suspended Solids (mg/L)` <- as.numeric(data$`Total Suspended Solids (mg/L)`)
+data$ `E. Coli       (MPN / 100ml)` <- as.numeric(data$`E. Coli       (MPN / 100ml)`)
+data$`Surfactants (mg/L)` <- as.numeric(data$`Surfactants (mg/L)`)
+data$`Copper (mg/L)` <- as.numeric(data$`Copper (mg/L)`)
+data$`Iron (mg/L)` <- as.numeric(data$`Iron (mg/L)`)
+data$`Hardness (mg/L)` <- as.numeric(data$`Hardness (mg/L)`)
+
+# View cleaned data in numeric format
+data 
+```
+
+```{r}
+# View summary statistics for all columns
+summary(data)
+```
+
+
+-----------------------------------------------------------------------------------------------------
+
+### Composite Score Calculation
+
+```{r}
+# Define the acceptable parameters for each pollutant 
+templimit <- 35
+conlimit <- 800
+ammonlimit <- 1.7
+nitlimit <- 0.68
+phoslimit <- 1.25
+tsslimit <- 50
+ecolilimit <- 126
+phlimit1 <- 6.5
+phlimit2 <- 9
+```
+
+```{r}
+# Function to calculate the composite score
+# To ignore pollutants from the scoring calculation, place a '#' in front of the pollutant call ("pollutant <-")and delete the corresponding word from the list of pollutant limits in parenthesis in the sum function (last line of the code below).
+
+score <- function(watershed,year){
+  shed <- subset(data, data$`HUC Watershed` == watershed)
+  shed_y <- subset(shed, shed$Year == year)
+  
+  temp <- sum(na.omit((shed_y$`Temperature (°C)` - templimit)/templimit))
+  con <- sum(na.omit((shed_y$`Conductivity (µS/cm)` - conlimit)/conlimit))
+  ammon <- sum(na.omit((shed_y$`Ammonia (as N) (mg/L)` - ammonlimit)/ammonlimit))
+  nit <- sum(na.omit((shed_y$`Nitrate + Nitrite (as N) (mg/L)` - nitlimit)/nitlimit))
+  phos <- sum(na.omit((shed_y$`Total Phosphorus (as P) (mg/L)` - phoslimit)/phoslimit))
+  tss <- sum(na.omit((shed_y$`Total Suspended Solids (mg/L)` - tsslimit)/tsslimit))
+  ecoli <- sum(na.omit((shed_y$`E. Coli       (MPN / 100ml)` - ecolilimit)/ecolilimit))
+  ph <- sum(na.omit(ifelse(shed_y$pH < phlimit1, (shed_y$pH - phlimit1)/phlimit1, (ifelse(shed_y$pH > phlimit2, (phlimit2)/phlimit2, 0)))))
+
+  
+  sum(temp,con,ammon,nit,phos,tss,ecoli,ph)
+}
+```
+
+```{r}
+# Create a blank dataframe for year, watershed, and score
+composite_score <- data.frame(Year = numeric(0), HUC_Watershed = numeric(0), score = numeric(0))
+
+# The line below needs to be updated to add additional watersheds. Use a comma to separate each watershed and type the watershed name in quotes. It is imperative to avoid typos or you will encounter errors in Tableau. It is recommended to copy and paste the watershed names from the excel file you will load into Tableau. 
+watersheds <- c("Headwaters Turtle Creek","Bachman Branch-Elm Fork Trinity River")
+
+# A "for loop" to put composite score values into the table created above, for 2009 - 2019
+# Update the years as you add more data 
+for(year in 2009:2019){
+  for (water in watersheds){
+    composite_score[nrow(composite_score)+1, ] <- c(year,water, -score(water,year))
+  }
+}
+
+# Convert score column to numeric format
+composite_score$score <- as.numeric(composite_score$score)
+
+# Round score to 3 digits 
+round(composite_score$score, digits = 3)
+
+# Order the dataframe by score, from best to worst
+ranks <- composite_score[order(composite_score$score, decreasing = TRUE),]
+ranks$Rank <- index(ranks)
+rownames(ranks) <- NULL
+ranks
+```
+
+-----------------------------------------------------------------------------------------------------
+
+#### Write the Score to a New File and Load into Tableau
+
+```{r, message = FALSE}
+# Create a new excel file to show composite score table in Tableau
+ranked_scores <- write.xlsx(ranks, file="ranked_scores.xlsx", row.names = FALSE)
+```
+
+-----------------------------------------------------------------------------------------------------
+
+### Statistical Summarization
+
+Update the code below to view statistics for a specific watershed or year as desired. 
+```{r}
+#Write a function to calculate main statistics on water quality data for specific watersheds and years
+stats <- function(watershed, year) {
+  shed <- subset(data, data$`HUC Watershed` == watershed)
+  shed_y <- subset(shed, shed$Year == year)
+  summary(shed_y)
+}
+
+#Apply the function to specified watersheds and years
+stats("Headwaters Turtle Creek", 2019)
+
+#To list more than one year or watershed, put them inside of a list using c(year, year, year) or c(watershed, watershed)
+```
+
+```{r}
+# A list of summary statistics for each pollutant
+
+summary <-
+  list("pH" =
+       list("min" = ~ round(min(na.omit(.data$pH)),3),
+            "median" = ~ round(median(na.omit(.data$pH)),3),
+            "max" = ~ round(max(na.omit(.data$pH)),3),
+            "mean" = ~ round(mean(na.omit(.data$pH)),3),
+            "std dev" = ~ round(sd(na.omit(.data$pH)),3)),
+       "Conductivity" =
+       list("min" = ~ round(min(na.omit(.data$`Conductivity (µS/cm)`)),3),
+            "median" = ~ round(median(na.omit(.data$`Conductivity (µS/cm)`)),3),
+            "max" = ~ round(max(na.omit(.data$`Conductivity (µS/cm)`)),3),
+            "mean" = ~ round(mean(na.omit(.data$`Conductivity (µS/cm)`)),3),
+            "std dev" = ~ round(sd(na.omit(.data$`Conductivity (µS/cm)`)),3)),
+       "Ammonia" =
+       list("min" = ~ round(min(na.omit(.data$`Ammonia (as N) (mg/L)`)),3),
+            "median" = ~ round(median(na.omit(.data$`Ammonia (as N) (mg/L)`)),3),
+            "max" = ~ round(max(na.omit(.data$`Ammonia (as N) (mg/L)`)),3),
+            "mean" = ~ round(mean(na.omit(.data$`Ammonia (as N) (mg/L)`)),3),
+            "std dev" = ~ round(sd(na.omit(.data$`Ammonia (as N) (mg/L)`)),3)),
+       "Nitrates" =
+       list("min" = ~ round(min(na.omit(.data$`Nitrate + Nitrite (as N) (mg/L)`)),3),
+            "median" = ~ round(median(na.omit(.data$`Nitrate + Nitrite (as N) (mg/L)`)),3),
+            "max" = ~ round(max(na.omit(.data$`Nitrate + Nitrite (as N) (mg/L)`)),3),
+            "mean" = ~ round(mean(na.omit(.data$`Nitrate + Nitrite (as N) (mg/L)`)),3),
+            "std dev" = ~ round(sd(na.omit(.data$`Nitrate + Nitrite (as N) (mg/L)`)),3)),
+       "Total Suspended Solids" =
+       list("min" = ~ round(min(na.omit(.data$`Total Suspended Solids (mg/L)`)),3),
+            "median" = ~ round(median(na.omit(.data$`Total Suspended Solids (mg/L)`)),3),
+            "max" = ~ round(max(na.omit(.data$`Total Suspended Solids (mg/L)`)),3),
+            "mean" = ~ round(mean(na.omit(.data$`Total Suspended Solids (mg/L)`)),3),
+            "std dev" = ~ round(sd(na.omit(.data$`Total Suspended Solids (mg/L)`)),3)),
+       "E. Coli" =
+       list("min" = ~ round(min(na.omit(.data$`E. Coli       (MPN / 100ml)`)),3),
+            "median" = ~ round(median(na.omit(.data$`E. Coli       (MPN / 100ml)`)),3),
+            "max" = ~ round(max(na.omit(.data$`E. Coli       (MPN / 100ml)`)),3),
+            "geo mean" = ~ round(geometric.mean(na.omit(.data$`E. Coli       (MPN / 100ml)`), na.rm = TRUE),3),
+            "std dev" = ~ round(sd(na.omit(.data$`E. Coli       (MPN / 100ml)`)),3)),
+       "Total Phosphorus" =
+       list("min" = ~ round(min(na.omit(.data$`Total Phosphorus (as P) (mg/L)`)),3),
+            "median" = ~ round(median(na.omit(.data$`Total Phosphorus (as P) (mg/L)`)),3),
+            "max" = ~ round(max(na.omit(.data$`Total Phosphorus (as P) (mg/L)`)),3),
+            "mean" = ~ round(mean(na.omit(.data$`Total Phosphorus (as P) (mg/L)`)),3),
+            "std dev" = ~ round(sd(na.omit(.data$`Total Phosphorus (as P) (mg/L)`)),3)),
+       "Temperature" =
+       list("min" = ~ round(min(na.omit(.data$`Temperature (°C)`)),3),
+            "median" = ~ round(median(na.omit(.data$`Temperature (°C)`)),3),
+            "max" = ~ round(max(na.omit(.data$`Temperature (°C)`)),3),
+            "mean" = ~ round(mean(na.omit(.data$`Temperature (°C)`)),3),
+            "std dev" = ~ round(sd(na.omit(.data$`Temperature (°C)`)),3))
+       )
+
+# Set up a table format
+options(qwraps2_markup = "markdown")
+
+# Put data into a summary statistic table using the list specified above
+table <- summary_table(data, summary)
+table
+
+```
+
+
+```{r}
+# Group the table by year
+grouped_table <-
+  summary_table(dplyr::group_by(data, .data$Year), summary)
+
+combined <- cbind(table, grouped_table)
+
+final_table <- print(combined,
+      rtitle = "Summary Statistics",
+      cnames = c("Row Average - All Years","2009", "2011", "2012", "2013", "2014", "2015", "2016", "2017", "2018", "2019"))
+```
+
